@@ -9,6 +9,7 @@ from velocity.metrics import categorize, compute_metrics, split_diff
 from velocity.pipeline import diff_report, pending_labels, run_scoring, select_targets, write_labels
 from velocity.prompt import build_diff_section, build_user_message, truncate_file_diff
 from velocity.scorer import normalize
+from velocity.store import Store
 from velocity.sync import apply_label_state
 
 from .conftest import DIFF, FILES, FakeGh, FakeScorer, make_pr
@@ -425,3 +426,100 @@ def test_settings_endpoint_updates_config_and_outdated_count(store, tmp_path, mo
         assert status == 400 and cfg.model == "claude-sonnet-5-5"
     finally:
         httpd.shutdown()
+
+
+# --- backup ----------------------------------------------------------------------
+def _git(cwd, *args):
+    import subprocess
+    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True).stdout
+
+
+def _data_repo(tmp_path):
+    """A data dir that is a git repo pushing to a local bare 'remote'."""
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+    data = tmp_path / "data"
+    data.mkdir()
+    _git(data, "init", "-q", "-b", "main")
+    _git(data, "config", "user.email", "t@example.com")
+    _git(data, "config", "user.name", "t")
+    (data / ".gitignore").write_text("diffs/\n")
+    _git(data, "remote", "add", "origin", str(remote))
+    return data, remote
+
+
+def test_backup_commits_and_pushes_only_when_changed(tmp_path):
+    from velocity.backup import backup
+
+    data, remote = _data_repo(tmp_path)
+    store = Store(data)
+    store.save_prs({"o/r#1": make_pr("o/r#1", score=4)})
+    store.save_diff("o/r#1", DIFF)
+    assert backup(data, reason="score", log=lambda m: None) == "pushed"
+    assert "Backup" in _git(remote, "log", "-1", "--format=%s") and "score" in _git(remote, "log", "-1", "--format=%s")
+    pushed_files = _git(remote, "ls-tree", "-r", "--name-only", "main").split()
+    assert "prs.json" in pushed_files and not any(f.startswith("diffs/") for f in pushed_files)
+    assert backup(data, log=lambda m: None) == "unchanged"
+
+
+def test_backup_retries_unpushed_commit(tmp_path):
+    from velocity.backup import backup
+
+    data, remote = _data_repo(tmp_path)
+    Store(data).save_prs({"o/r#1": make_pr("o/r#1")})
+    assert backup(data, log=lambda m: None) == "pushed"
+    _git(data, "remote", "set-url", "origin", str(tmp_path / "missing.git"))
+    Store(data).save_prs({"o/r#1": make_pr("o/r#1", score=7)})
+    assert backup(data, log=lambda m: None) == "failed"  # committed locally, push failed
+    _git(data, "remote", "set-url", "origin", str(remote))
+    assert backup(data, log=lambda m: None) == "pushed"  # no new changes, but the old commit goes out
+    assert '"score": 7' in _git(remote, "show", "main:prs.json")
+
+
+def test_backup_skips_when_not_configured(tmp_path):
+    from velocity.backup import backup
+
+    assert backup(tmp_path / "plain", log=lambda m: None) == "skipped"
+
+
+def test_missing_diff_is_downloaded_again_and_cached(store):
+    calls = []
+    store.diff_fetcher = lambda key: calls.append(key) or DIFF
+    assert store.load_diff("o/r#1") == DIFF
+    assert store.load_diff("o/r#1") == DIFF and calls == ["o/r#1"]  # second read hits the cache
+
+
+def test_failed_diff_download_is_not_cached(store):
+    store.diff_fetcher = lambda key: "[diff unavailable: timeout]"
+    assert store.load_diff("o/r#1").startswith("[diff unavailable")
+    assert not store.diff_path("o/r#1").exists()
+
+
+def test_diff_fetcher_parses_key():
+    from velocity.github import diff_fetcher
+
+    class Gh:
+        def pr_diff(self, repo, number):
+            return f"{repo}:{number}"
+
+    assert diff_fetcher(Gh())("owner/repo-name#42") == "owner/repo-name:42"
+
+
+def test_jobs_call_on_finish_after_success_and_failure():
+    import time
+
+    from velocity.server import Jobs
+
+    finished = []
+    jobs = Jobs(on_finish=finished.append)
+    jobs.start("ok", lambda j: 1)
+    for _ in range(50):
+        if jobs.snapshot()["state"] != "running" and finished:
+            break
+        time.sleep(0.02)
+    jobs.start("boom", lambda j: 1 / 0)
+    for _ in range(50):
+        if len(finished) == 2:
+            break
+        time.sleep(0.02)
+    assert finished == ["ok", "boom"]

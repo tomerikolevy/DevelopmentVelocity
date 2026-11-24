@@ -9,11 +9,12 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import DATA_DIR
 
 _LOCK = threading.RLock()
+DIFF_UNAVAILABLE = "[diff unavailable"
 
 
 def _read(path: Path, default: Any) -> Any:
@@ -42,6 +43,9 @@ class Store:
         self.cal_path = data_dir / "calibration.json"
         self.diff_dir = data_dir / "diffs"
         self.lock = _LOCK
+        # Diffs are a local cache (not backed up). When set, a missing diff is
+        # downloaded again on first use: fn(key) -> diff text.
+        self.diff_fetcher: Callable[[str], str] | None = None
 
     # --- PRs -------------------------------------------------------------
     def load_prs(self) -> dict[str, dict]:
@@ -67,7 +71,14 @@ class Store:
 
     def load_diff(self, key: str) -> str | None:
         p = self.diff_path(key)
-        return p.read_text(errors="replace") if p.exists() else None
+        if p.exists():
+            return p.read_text(errors="replace")
+        if self.diff_fetcher is None:
+            return None
+        diff = self.diff_fetcher(key)
+        if not diff.startswith(DIFF_UNAVAILABLE):  # don't cache a failed download
+            self.save_diff(key, diff)
+        return diff
 
     def save_diff(self, key: str, diff: str) -> None:
         p = self.diff_path(key)

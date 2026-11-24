@@ -6,6 +6,8 @@ import subprocess
 from datetime import date, timedelta
 from typing import Callable
 
+from .store import DIFF_UNAVAILABLE
+
 SEARCH_LIMIT = 1000  # GitHub search returns at most 1000 results per query
 LABEL_COLORS = {  # light -> dark green-to-red, so the scale reads at a glance in GitHub
     1: "c2e0c6", 2: "a2d2a8", 3: "7fc48a", 4: "fbe7a1", 5: "f9d77e",
@@ -69,7 +71,7 @@ class GitHub:
             return self.run(["pr", "diff", str(number), "--repo", repo])
         except GhError as e:
             # Very large diffs are refused by the API; scoring falls back to the file list.
-            return f"[diff unavailable: {e}]"
+            return f"{DIFF_UNAVAILABLE}: {e}]"
 
     def pr_labels(self, repo: str, number: int) -> list[str]:
         data = self._json(["pr", "view", str(number), "--repo", repo, "--json", "labels"]) or {}
@@ -134,3 +136,11 @@ def label_score(labels: list[str], prefix: str) -> int | None:
             if 1 <= n <= 10:
                 values.append(n)
     return max(values) if values else None
+
+
+def diff_fetcher(gh: "GitHub"):
+    """Store.diff_fetcher that downloads a PR's diff by its key ("owner/repo#123")."""
+    def fetch(key: str) -> str:
+        repo, number = key.rsplit("#", 1)
+        return gh.pr_diff(repo, int(number))
+    return fetch
