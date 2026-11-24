@@ -47,7 +47,7 @@ def scoring_settings(cfg: Config) -> dict:
 
 
 class Jobs:
-    """One background job at a time (rescore phase 1, or label writing)."""
+    """One background job at a time (sync + score, rescore phase 1, or label writing)."""
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -95,6 +95,31 @@ def make_handler(cfg: Config, store: Store, jobs: Jobs):
         run = run_scoring(keys, ClaudeScorer(run_cfg), store, run_cfg.model, progress=job.progress,
                           effort=run_cfg.effort)
         return diff_report(run)
+
+    def sync_score_job(job: Jobs):
+        """Same as `sync` then `score` on the command line, minus the label prompt:
+        new scores show up in the labels banner for the user to apply."""
+        from .scorer import ClaudeScorer
+        from .sync import sync
+
+        def sync_log(msg: str):
+            m = re.search(r"\[(\d+)/(\d+)\]\s+(\S+)", msg)
+            if m:
+                job.progress(int(m[1]), int(m[2]), m[3], msg.split(m[3], 1)[1].strip())
+            else:
+                with job.lock:
+                    job.state["log"] = (job.state["log"] + [msg])[-8:]
+
+        run_cfg = dataclasses.replace(cfg)  # settings can't change mid-run
+        with job.lock:
+            job.state.update(phase="sync", model=run_cfg.model, effort=run_cfg.effort)
+        synced = sync(run_cfg, store, GitHub(), log=sync_log)
+        keys = select_targets(store.load_prs(), "unscored", run_cfg.rubric_version)
+        with job.lock:
+            job.state.update(phase="score", done=0, total=len(keys))
+        report = diff_report(run_scoring(keys, ClaudeScorer(run_cfg), store, run_cfg.model,
+                                         progress=job.progress, effort=run_cfg.effort)) if keys else None
+        return {"sync": synced, "score": report}
 
     def labels_job(include_manual: bool):
         def fn(job: Jobs):
@@ -201,6 +226,9 @@ def make_handler(cfg: Config, store: Store, jobs: Jobs):
                     return self._json(scoring_settings(cfg))
                 if path == "/api/rescore/start":
                     ok = jobs.start("rescore", rescore_job)
+                    return self._json({"started": ok}, 200 if ok else 409)
+                if path == "/api/sync-score/start":
+                    ok = jobs.start("sync-score", sync_score_job)
                     return self._json({"started": ok}, 200 if ok else 409)
                 if path == "/api/labels/apply":
                     ok = jobs.start("labels", labels_job(bool(body.get("include_manual"))))

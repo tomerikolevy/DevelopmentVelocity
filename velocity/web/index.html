@@ -11,12 +11,17 @@
   <h1>Development Velocity</h1>
   <nav><a href="/" class="active">Velocity</a><a href="/calibrate" class="live-only">Calibrate</a></nav>
   <div class="meta" id="meta"></div>
-  <div class="scoring live-only" title="Used by Rescore here and by the score/rescore commands">
+  <div class="scoring live-only" title="Used by Rescore and Sync &amp; score here, and by the score/rescore commands">
     <label>Scoring model <select id="s-model"></select></label>
     <label>Effort <select id="s-effort"></select></label>
+    <button id="sync-btn" title="Fetch new merged PRs from GitHub, then score the ones never scored. GitHub labels are not changed.">Sync &amp; score</button>
   </div>
 </header>
 <main>
+  <div class="banner hidden live-only" id="sync-banner">
+    <div class="grow" id="sync-text"></div>
+    <progress id="sync-progress" class="hidden"></progress>
+  </div>
   <div class="banner hidden live-only" id="rescore-banner">
     <div class="grow" id="rescore-text"></div>
     <progress id="rescore-progress" class="hidden"></progress>

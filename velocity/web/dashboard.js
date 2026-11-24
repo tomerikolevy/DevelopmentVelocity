@@ -180,24 +180,44 @@
       ${months ? `<h2 style="margin-top:12px">Monthly complexity</h2><table><thead><tr><th>Month</th><th>Before</th><th>After</th></tr></thead><tbody>${months}</tbody></table>` : ""}`;
     box.classList.remove("hidden");
   }
+  function syncSummary(r) {
+    const sy = r.sync, sc = r.score;
+    let t = `Synced ${sy.found} merged PRs: ${sy.new} new${sy.failed.length ? `, ${sy.failed.length} failed to download (retried next time)` : ""}.`;
+    t += sc ? ` Scored ${sc.scored} PRs${sc.errors.length ? `, ${sc.errors.length} failed` : ""}.` : " Nothing new to score.";
+    return t;
+  }
   async function poll() {
     const s = await api("/api/rescore/status");
     const running = s.state === "running";
-    $("#rescore-btn").disabled = running; $("#labels-btn").disabled = running;
+    const syncing = running && s.kind === "sync-score";
+    $("#rescore-btn").disabled = running; $("#labels-btn").disabled = running; $("#sync-btn").disabled = running;
     $("#s-model").disabled = running; $("#s-effort").disabled = running;
     $("#rescore-progress").classList.toggle("hidden", !(running && s.kind === "rescore"));
+    $("#sync-progress").classList.toggle("hidden", !(syncing && s.total));
+    if (syncing) {
+      $("#sync-banner").classList.remove("hidden");
+      if (s.total) { $("#sync-progress").max = s.total; $("#sync-progress").value = s.done; }
+      const counts = s.total ? ` ${s.done}/${s.total}` : "";
+      $("#sync-text").textContent = s.phase === "score" ? `Scoring new PRs with ${modelLabel(s.model)} (${s.effort} effort)…${counts}` : `Syncing from GitHub…${counts}`;
+    }
     if (running) {
-      if (s.total) { $("#rescore-progress").max = s.total; $("#rescore-progress").value = s.done; }
-      $("#rescore-text").textContent = s.kind === "rescore" ? `Rescoring with ${modelLabel(s.model)} (${s.effort} effort)… ${s.done}/${s.total || "?"}` : "Writing labels to GitHub…";
+      if (s.kind === "rescore" && s.total) { $("#rescore-progress").max = s.total; $("#rescore-progress").value = s.done; }
+      if (s.kind !== "sync-score") $("#rescore-text").textContent = s.kind === "rescore" ? `Rescoring with ${modelLabel(s.model)} (${s.effort} effort)… ${s.done}/${s.total || "?"}` : "Writing labels to GitHub…";
       setTimeout(poll, 1500);
       return;
     }
     if (s.state === "done" || s.state === "error") {
       await load();
-      if (s.state === "error") alert(`Job failed: ${s.error}`);
+      if (s.kind === "sync-score") {
+        $("#sync-banner").classList.remove("hidden");
+        $("#sync-text").textContent = s.state === "error" ? `Sync & score failed: ${s.error}` : syncSummary(s.result);
+      } else if (s.state === "error") alert(`Job failed: ${s.error}`);
       else if (s.kind === "rescore" && !state.shownReport) { renderReport(s.result); state.shownReport = true; }
     }
   }
+  $("#sync-btn").onclick = async () => {
+    try { await api("/api/sync-score/start", { method: "POST" }); poll(); } catch (e) { alert(e.message); }
+  };
   $("#rescore-btn").onclick = async () => {
     try { state.shownReport = false; await api("/api/rescore/start", { method: "POST" }); poll(); } catch (e) { alert(e.message); }
   };
@@ -232,7 +252,7 @@
     renderBanners();
     document.getElementById("empty-note")?.remove();
     if (!scored) {
-      document.querySelector("main").insertAdjacentHTML("afterbegin", `<div class="card" id="empty-note" style="margin-bottom:16px">No scored PRs yet. ${STATIC ? "Run <code>python -m velocity score</code>, then export again." : "Pick a scoring model above and click <b>Rescore</b>, or run <code>python -m velocity score</code>."}</div>`);
+      document.querySelector("main").insertAdjacentHTML("afterbegin", `<div class="card" id="empty-note" style="margin-bottom:16px">No scored PRs yet. ${STATIC ? "Run <code>python -m velocity score</code>, then export again." : "Pick a scoring model above and click <b>Sync &amp; score</b>, or run <code>python -m velocity sync</code> then <code>python -m velocity score</code>."}</div>`);
     }
     render();
   }
