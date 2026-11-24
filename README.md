@@ -25,6 +25,7 @@ The key is read from `ANTHROPIC_API_KEY_COMPLEXITY_SCORER`. If that variable is 
 .venv/bin/python -m velocity labels         # write pending labels to GitHub
 .venv/bin/python -m velocity serve          # dashboard + calibrate at http://localhost:8787
 .venv/bin/python -m velocity report         # static read-only dashboard.html
+.venv/bin/python -m velocity backup         # push data/ to its backup repo (also automatic)
 ```
 
 ## How scores work
@@ -44,7 +45,33 @@ On the dashboard's Calibrate page you see two PRs that got the same score.
 
 ## Data
 
-`data/prs.json` holds PR records and scores, `data/calibration.json` holds reviews and proposals, and `data/diffs/` caches diffs. All are git-ignored.
+`data/prs.json` holds PR records and scores, `data/calibration.json` holds reviews and proposals, and `data/diffs/` caches diffs. The code repository ignores `data/`; it's backed up separately (see Backup).
+
+## Backup
+
+`data/` is its own private git repository (`DevelopmentVelocity-data` on GitHub), separate from the code. It's committed and pushed automatically:
+
+- after `sync`, `score`, `rescore`, `labels` and `all`;
+- after each dashboard job (Sync & score, Rescore, writing labels) and each Calibrate action.
+
+`python -m velocity backup` runs a backup by hand. A failed push is reported but doesn't stop anything; the next backup retries it.
+
+**Diffs aren't backed up.** They're large (hundreds of KB per PR) and can be downloaded again, so `data/.gitignore` excludes `diffs/`. When a diff is missing, scoring downloads it again from GitHub on first use.
+
+**Restore** on a new machine, or after losing `data/`:
+
+```bash
+gh repo clone <you>/DevelopmentVelocity-data data
+```
+
+**Set up** backup for a fresh `data/`:
+
+```bash
+cd data && printf 'diffs/\n*.tmp\n.DS_Store\n' > .gitignore && git init -b main && git add -A && git commit -m "Initial data backup"
+gh repo create DevelopmentVelocity-data --private --source=. --push
+```
+
+If `data/` isn't a git repo with a remote, backup does nothing.
 
 `scripts/demo_server.py .demo/data` serves the dashboard on a copy of the data with made-up scores, for trying the UI.
 

@@ -12,8 +12,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 from . import calibrate as cal
+from .backup import backup, backup_in_background
 from .config import EFFORTS, MODELS, WEB_DIR, Config, set_scoring
-from .github import GitHub
+from .github import GitHub, diff_fetcher
 from .pipeline import diff_report, pending_labels, run_scoring, select_targets, write_labels
 from .scorer import load_rubric
 from .store import Store
@@ -49,9 +50,10 @@ def scoring_settings(cfg: Config) -> dict:
 class Jobs:
     """One background job at a time (sync + score, rescore phase 1, or label writing)."""
 
-    def __init__(self):
+    def __init__(self, on_finish=None):
         self.lock = threading.Lock()
         self.state = {"state": "idle"}
+        self.on_finish = on_finish  # called with the job kind after it ends (done or failed)
 
     def start(self, kind: str, fn) -> bool:
         with self.lock:
@@ -68,6 +70,8 @@ class Jobs:
                 traceback.print_exc()
                 with self.lock:
                     self.state.update(state="error", error=str(e))
+            if self.on_finish:  # a failed job may still have saved partial results
+                self.on_finish(kind)
 
         threading.Thread(target=runner, daemon=True).start()
         return True
@@ -195,9 +199,20 @@ def make_handler(cfg: Config, store: Store, jobs: Jobs):
                 return self._json({"error": str(e)}, 500)
 
         def do_POST(self):
+            self.backup_after = None
+            try:
+                self._post()
+            finally:
+                if self.backup_after:
+                    backup_in_background(store.data_dir, self.backup_after)
+
+        def _post(self):
             path = urlparse(self.path).path
             try:
                 body = self._body()
+                if path.startswith("/api/calibrate/"):
+                    # Calibration changes are small; back them up once the request has been handled.
+                    self.backup_after = "calibration"
                 if path == "/api/calibrate/review":
                     review = cal.record_review(
                         store, cfg.rubric_version, body["a"], body["b"], int(body["score"]), body["verdict"],
@@ -257,7 +272,9 @@ def _dashboard_running(url: str) -> bool:
 def serve(cfg: Config, store: Store, port: int, open_browser: bool = True) -> None:
     url = f"http://localhost:{port}"
     try:
-        httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(cfg, store, Jobs()))
+        store.diff_fetcher = diff_fetcher(GitHub())  # diffs aren't backed up; re-download when missing
+        jobs = Jobs(on_finish=lambda kind: backup(store.data_dir, reason=kind))
+        httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(cfg, store, jobs))
     except OSError as e:
         if e.errno != errno.EADDRINUSE:
             raise

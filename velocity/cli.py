@@ -5,7 +5,8 @@ import argparse
 import sys
 
 from .config import ROOT, load_config
-from .github import GitHub
+from .backup import backup, is_configured
+from .github import GitHub, diff_fetcher
 from .pipeline import diff_report, format_report, pending_labels, run_scoring, select_targets, write_labels
 from .store import Store
 
@@ -90,10 +91,12 @@ def main(argv: list[str] | None = None) -> None:
     rp.add_argument("-o", "--output", default=str(ROOT / "dashboard.html"))
 
     sub.add_parser("all", help="sync, score new PRs (asks before labelling), export report")
+    sub.add_parser("backup", help="commit and push data/ to its backup repo (also runs automatically)")
 
     args = p.parse_args(argv)
     cfg = load_config()
     store = Store()
+    store.diff_fetcher = diff_fetcher(GitHub())  # diffs aren't backed up; re-download when missing
 
     if args.cmd in ("sync", "all"):
         from .sync import sync
@@ -116,6 +119,16 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "serve":
         from .server import serve
         serve(cfg, store, args.port or cfg.port)
+    if args.cmd in ("sync", "score", "rescore", "labels", "all"):
+        backup(store.data_dir, reason=args.cmd)
+    if args.cmd == "backup":
+        if not is_configured(store.data_dir):
+            sys.exit("data/ is not set up for backup. See README, \"Backup\".")
+        status = backup(store.data_dir, reason="manual")
+        if status == "unchanged":
+            print("Backup is up to date.")
+        elif status == "failed":
+            sys.exit(1)
     if args.cmd in ("report", "all"):
         from .report import export_static
         out = export_static(store, cfg, getattr(args, "output", str(ROOT / "dashboard.html")))
