@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 
 from .store import DIFF_UNAVAILABLE
@@ -43,7 +43,9 @@ class GitHub:
     def search_merged_prs(self, author: str, since: str, until: date | None = None) -> list[dict]:
         """All merged PRs by author. Splits the date range when a window hits the 1000 cap."""
         start = date.fromisoformat(since) if since else date(2008, 1, 1)
-        end = until or date.today()
+        # GitHub compares merge dates in UTC. Ending at the local date would drop PRs
+        # merged in the local evening (already "tomorrow" in UTC), so end a day past UTC today.
+        end = until or datetime.now(timezone.utc).date() + timedelta(days=1)
         return self._search_window(author, start, end)
 
     def _search_window(self, author: str, start: date, end: date) -> list[dict]:

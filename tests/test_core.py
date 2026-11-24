@@ -532,3 +532,21 @@ def test_jobs_call_on_finish_after_success_and_failure():
             break
         time.sleep(0.02)
     assert finished == ["ok", "boom"]
+
+
+def test_search_range_includes_prs_merged_today_in_utc(monkeypatch):
+    """Regression: a PR merged in the local evening is already 'tomorrow' in UTC."""
+    import datetime as dt
+
+    from velocity import github as gh_mod
+
+    class FixedDatetime(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return dt.datetime(2026, 11, 24, 5, 14, tzinfo=dt.timezone.utc)  # 22:14 MST on Nov 23
+
+    monkeypatch.setattr(gh_mod, "datetime", FixedDatetime)
+    calls = []
+    GitHub(runner=lambda args: calls.append(args) or "[]").search_merged_prs("@me", "2024-01-01")
+    merged_at = calls[0][calls[0].index("--merged-at") + 1]
+    assert merged_at == "2024-01-01..2026-11-25"
