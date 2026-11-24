@@ -271,3 +271,69 @@ def test_make_client_prefers_configured_key_env(monkeypatch):
     assert make_client(cfg).api_key == "scorer-key"
     monkeypatch.delenv("ANTHROPIC_API_KEY_COMPLEXITY_SCORER")
     assert make_client(cfg).api_key == "generic-key"
+
+
+# --- sync --------------------------------------------------------------------
+class FakeSyncGh:
+    """Stands in for GitHub during sync; `fail` holds PR numbers whose details fetch errors."""
+
+    def __init__(self, n, fail=()):
+        self.rows = [{"repository": {"nameWithOwner": "me/big"}, "number": i, "title": f"PR {i}",
+                      "url": f"u{i}", "labels": []} for i in range(1, n + 1)]
+        self.fail = set(fail)
+        self.fetched = []
+
+    def search_merged_prs(self, author, since):
+        return self.rows
+
+    def pr_details(self, repo, number):
+        if number in self.fail:
+            raise RuntimeError("timeout")
+        self.fetched.append(number)
+        return {"title": f"PR {number}", "url": f"u{number}", "mergedAt": "2025-01-01T00:00:00Z",
+                "files": FILES, "commits": []}
+
+    def pr_diff(self, repo, number):
+        return DIFF
+
+    def repo_info(self, repo):
+        return {"description": "", "language": "Python", "permission": "WRITE"}
+
+
+def test_sync_skips_failed_pr_and_retries_it_next_time(store, cfg):
+    from velocity.sync import sync
+
+    gh = FakeSyncGh(5, fail={3})
+    result = sync(cfg, store, gh, log=lambda m: None, workers=3)
+    assert result["new"] == 4 and result["failed"] == ["me/big#3"]
+    assert "me/big#3" not in store.load_prs() and len(store.load_prs()) == 4
+
+    gh.fail.clear(); gh.fetched.clear()
+    result = sync(cfg, store, gh, log=lambda m: None)
+    assert gh.fetched == [3]  # only the missing PR is downloaded again
+    assert result["new"] == 1 and result["refreshed"] == 4 and len(store.load_prs()) == 5
+
+
+def test_sync_saves_progress_before_finishing(store, cfg, monkeypatch):
+    from velocity import sync as sync_mod
+
+    monkeypatch.setattr(sync_mod, "SAVE_EVERY_PRS", 2)
+    saved_sizes = []
+    real_save = store.save_prs
+    monkeypatch.setattr(store, "save_prs", lambda prs: (saved_sizes.append(len(prs)), real_save(prs)))
+    sync_mod.sync(cfg, store, FakeSyncGh(5), log=lambda m: None, workers=1)
+    assert 2 in saved_sizes and 4 in saved_sizes and saved_sizes[-1] == 5
+
+
+def test_sync_keeps_fetched_prs_when_interrupted(store, cfg):
+    from velocity.sync import sync
+
+    class InterruptingGh(FakeSyncGh):
+        def pr_details(self, repo, number):
+            if number == 4:
+                raise KeyboardInterrupt
+            return super().pr_details(repo, number)
+
+    with pytest.raises(KeyboardInterrupt):
+        sync(cfg, store, InterruptingGh(6), log=lambda m: None, workers=1)
+    assert sorted(p["number"] for p in store.load_prs().values()) == [1, 2, 3]

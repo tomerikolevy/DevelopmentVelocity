@@ -59,7 +59,8 @@ def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="velocity", description="Complexity-weighted development velocity")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("sync", help="fetch merged PRs and current labels from GitHub")
+    syp = sub.add_parser("sync", help="fetch merged PRs and current labels from GitHub")
+    syp.add_argument("--workers", type=int, default=4, help="PRs downloaded in parallel")
 
     for name, help_text in (("score", "score PRs that were never scored"),
                             ("rescore", "re-score PRs scored with an older rubric")):
@@ -93,7 +94,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.cmd in ("sync", "all"):
         from .sync import sync
-        sync(cfg, store, GitHub())
+        sync(cfg, store, GitHub(), workers=getattr(args, "workers", 4))
     if args.cmd == "score":
         _score(args, cfg, store, "unscored")
     elif args.cmd == "rescore":
