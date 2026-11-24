@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calibrate · Development Velocity</title>
+<link rel="stylesheet" href="/static/common.css">
+<style>
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .pair { grid-template-columns: 1fr; } }
+  .pr-card h3 { margin: 4px 0 6px; font-size: 15px; line-height: 1.35; }
+  .pr-card .which { font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: .04em; }
+  .pr-card .meta { color: var(--text-muted); font-size: 12.5px; margin-bottom: 10px; }
+  .pr-card .summary { margin: 0 0 12px; }
+  .pr-card dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 12px; font-size: 12.5px; }
+  .pr-card dt { color: var(--text-secondary); }
+  .pr-card dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .meter { display: inline-flex; gap: 3px; vertical-align: -1px; margin-right: 6px; }
+  .meter i { width: 14px; height: 8px; border-radius: 2px; background: var(--grid); }
+  .meter i.on { background: var(--accent); }
+  .rationale { font-size: 12.5px; color: var(--text-secondary); border-left: 3px solid var(--border); padding-left: 10px; }
+  .pair-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+  .pair-head .big { font-size: 22px; font-weight: 650; }
+  .actions { display: flex; gap: 10px; margin-top: 16px; align-items: center; }
+  .dispute-form { margin-top: 16px; }
+  .radios { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin: 8px 0 12px; }
+  .radios label { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+  .radios label:has(input:checked) { border-color: var(--accent); }
+  .score-inputs { display: flex; gap: 16px; margin-bottom: 12px; font-size: 12.5px; color: var(--text-secondary); }
+  .score-inputs input { width: 64px; margin-left: 6px; }
+  .section { margin-top: 24px; }
+  .proposal h3 { font-size: 13px; margin: 14px 0 6px; color: var(--text-secondary); }
+  .proposal ul { margin: 0; padding-left: 18px; }
+  .stats-row { display: flex; gap: 28px; flex-wrap: wrap; }
+  .stats-row .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .stats-row .l { font-size: 12px; color: var(--text-secondary); }
+  .list-item { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+  .list-item:last-child { border-bottom: 0; }
+  #rubric-text { white-space: pre-wrap; font-size: 12.5px; max-height: 420px; overflow: auto; background: var(--surface-0); padding: 12px; border-radius: 8px; border: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Development Velocity</h1>
+  <nav><a href="/">Velocity</a><a href="/calibrate" class="active">Calibrate</a></nav>
+  <div class="meta" id="meta"></div>
+</header>
+<main>
+  <div class="card" id="stats" style="margin-bottom:16px"></div>
+
+  <div class="card" id="pair-card">
+    <div class="pair-head"><span class="big" id="pair-title">Loading pair…</span><span class="muted" id="pair-sub"></span></div>
+    <div class="pair" id="pair"></div>
+    <div class="actions" id="verdict-actions">
+      <button class="primary" id="agree-btn">Agree — same complexity</button>
+      <button id="dispute-btn">Dispute</button>
+      <button id="skip-btn">Skip pair</button>
+      <span class="muted" id="verdict-msg"></span>
+    </div>
+    <div class="dispute-form hidden" id="dispute-form">
+      <strong>What's wrong with these scores?</strong>
+      <div class="radios" id="dispute-types"></div>
+      <div class="score-inputs">
+        <label>Your score for A (optional)<input type="number" min="1" max="10" id="us-a"></label>
+        <label>Your score for B (optional)<input type="number" min="1" max="10" id="us-b"></label>
+      </div>
+      <label for="explanation"><strong>Explain why</strong> <span class="muted">(required — this is what the rubric change is based on)</span></label>
+      <textarea id="explanation" rows="4" placeholder="e.g. A only renames a config key across files, while B changes how retries interact with the cache…"></textarea>
+      <div class="actions">
+        <button class="primary" id="submit-analyze">Submit &amp; analyze</button>
+        <button id="submit-later">Submit, analyze later</button>
+        <button id="cancel-dispute">Cancel</button>
+        <span class="muted" id="dispute-msg"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card section hidden proposal" id="proposal"></div>
+
+  <div class="grid two section">
+    <div class="card"><h2>Open disputes</h2><p class="sub">Disputes not analyzed yet, or whose proposal you rejected. Select several to get one combined proposal.</p><div id="disputes"></div></div>
+    <div class="card"><h2>Saved proposals</h2><p class="sub">Proposals you saved for later.</p><div id="saved"></div></div>
+  </div>
+
+  <div class="card section">
+    <h2>Current rubric <span class="muted" id="rubric-version"></span></h2>
+    <p class="sub">The instructions Claude scores with. Accepting a proposal creates the next version.</p>
+    <button id="rubric-toggle">Show rubric</button>
+    <div id="rubric-text" class="hidden" style="margin-top:12px"></div>
+  </div>
+</main>
+<script src="/static/charts.js"></script>
+<script src="/static/calibrate.js"></script>
+</body>
+</html>

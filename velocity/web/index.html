@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Development Velocity</title>
+<link rel="stylesheet" href="/static/common.css">
+</head>
+<body>
+<header class="top">
+  <h1>Development Velocity</h1>
+  <nav><a href="/" class="active">Velocity</a><a href="/calibrate" class="live-only">Calibrate</a></nav>
+  <div class="meta" id="meta"></div>
+</header>
+<main>
+  <div class="banner hidden live-only" id="rescore-banner">
+    <div class="grow" id="rescore-text"></div>
+    <progress id="rescore-progress" class="hidden"></progress>
+    <button id="rescore-btn" class="primary">Rescore</button>
+  </div>
+  <div class="banner hidden live-only" id="labels-banner">
+    <div class="grow" id="labels-text"></div>
+    <button id="labels-btn">Write labels to GitHub</button>
+  </div>
+  <div class="card hidden live-only" id="rescore-report" style="margin-bottom:16px"></div>
+
+  <div class="filters">
+    <label>From <input type="date" id="f-from"></label>
+    <label>To <input type="date" id="f-to"></label>
+    <label>Repository <select id="f-repo"><option value="">All repositories</option></select></label>
+    <label>Group by
+      <span class="seg" id="f-gran"><button data-v="week">Week</button><button data-v="month" class="on">Month</button></span>
+    </label>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card" style="margin-bottom:16px">
+    <h2>Complexity units delivered</h2>
+    <p class="sub">Sum of PR complexity scores per period, by repository, with a rolling 4-period average</p>
+    <div class="chart" id="c-units"></div>
+  </div>
+
+  <div class="grid two" style="margin-bottom:16px">
+    <div class="card"><h2>Merged PRs</h2><p class="sub">Count per period, for comparison with complexity</p><div class="chart" id="c-count"></div></div>
+    <div class="card"><h2>Average complexity per PR</h2><p class="sub">Mean score of PRs merged in the period</p><div class="chart" id="c-avg"></div></div>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <h2>Score distribution</h2><p class="sub">How many PRs received each score</p><div class="chart" id="c-dist"></div>
+  </div>
+
+  <div class="card">
+    <h2>Pull requests</h2><p class="sub" id="table-sub"></p>
+    <div class="table-wrap"><table id="pr-table"><thead><tr>
+      <th data-k="merged_at">Merged</th><th data-k="repo">Repository</th><th data-k="title">Title</th>
+      <th data-k="score">Score</th><th>Dimensions</th><th>Rationale</th><th data-k="score_source">Source</th><th data-k="rubric_version">Rubric</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+</main>
+<script src="/static/charts.js"></script>
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+# Development Velocity configuration
+
+# GitHub author whose merged PRs are tracked ("@me" = the account gh is logged in as)
+author = "@me"
+
+# Only PRs merged on or after this date are synced (YYYY-MM-DD, empty = all history)
+since = "2024-01-01"
+
+# Repos to skip, as "owner/name"
+exclude_repos = []
+
+# Label prefix written to GitHub PRs: complexity:1 .. complexity:10
+label_prefix = "complexity:"
+
+[scoring]
+model = "claude-opus-5-5"
+effort = "medium"
+# Active rubric version: rubric/rubric_v<N>.md. Calibrate bumps this when you accept a proposal.
+rubric_version = 1
+max_diff_chars = 40000
+max_lines_per_file = 300
+
+[server]
+port = 8787

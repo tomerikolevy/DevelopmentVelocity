@@ -1,0 +1,7 @@
+.venv/
+data/
+__pycache__/
+*.pyc
+dashboard.html
+.pytest_cache/
+.demo/

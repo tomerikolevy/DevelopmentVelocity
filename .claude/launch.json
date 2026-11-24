@@ -1,0 +1,3 @@
+{"version":"0.0.1","configurations":[
+ {"name":"velocity-demo","runtimeExecutable":".venv/bin/python","runtimeArgs":["-u","scripts/demo_server.py",".demo/data"],"port":8788},
+ {"name":"velocity","runtimeExecutable":".venv/bin/python","runtimeArgs":["-u","-m","velocity","serve"],"port":8787}]}
