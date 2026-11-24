@@ -178,6 +178,15 @@ def test_write_labels_without_permission(store, cfg):
     assert store.load_prs()["o/r#1"]["label_status"] == "no_permission"
 
 
+def test_write_labels_reports_progress(store, cfg):
+    seed(store, [make_pr("o/r#1", llm_score=5, score=5, score_source="llm", label_status="pending"),
+                 make_pr("o/r#2", llm_score=3, score=4, score_source="manual")])
+    calls = []
+    write_labels(["o/r#1", "o/r#2"], cfg, store, FakeGh(), log=lambda m: None,
+                 progress=lambda i, total, key, msg: calls.append((i, total, key, msg)))
+    assert calls == [(1, 2, "o/r#1", "written"), (2, 2, "o/r#2", "skipped (manual)")]
+
+
 # --- calibrate --------------------------------------------------------------
 def scored(key, s, v=1, source="llm"):
     return make_pr(key, llm_score=s, score=s, score_source=source, rubric_version=v,

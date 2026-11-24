@@ -148,14 +148,21 @@ def pending_labels(prs: dict[str, dict], include_manual: bool = False) -> list[s
 
 
 def write_labels(keys: Iterable[str], cfg: Config, store: Store, gh: GitHub,
-                 include_manual: bool = False, log: Callable[[str], None] = print) -> dict:
-    """Writes complexity:<llm_score> to each PR. Manual overrides are skipped unless include_manual."""
+                 include_manual: bool = False, log: Callable[[str], None] = print,
+                 progress: Callable[[int, int, str, str], None] | None = None) -> dict:
+    """Writes complexity:<llm_score> to each PR. Manual overrides are skipped unless include_manual.
+
+    progress(i, total, key, status) is called after each PR, like run_scoring's callback."""
     counts = defaultdict(int)
-    for key in keys:
+    keys = list(keys)
+    total = len(keys)
+    for i, key in enumerate(keys, 1):
         with store.lock:
             pr = store.load_prs()[key]
         if pr.get("score_source") == "manual" and not include_manual:
             counts["skipped_manual"] += 1
+            if progress:
+                progress(i, total, key, "skipped (manual)")
             continue
         score = pr["llm_score"]
         fields: dict = {}
@@ -174,5 +181,7 @@ def write_labels(keys: Iterable[str], cfg: Config, store: Store, gh: GitHub,
                 counts["error"] += 1
                 log(f"  label failed for {key}: {e}")
         store.update_pr(key, fields)
+        if progress:
+            progress(i, total, key, fields["label_status"])
     log("Labels: " + ", ".join(f"{k} {v}" for k, v in counts.items()) if counts else "Labels: nothing to write.")
     return dict(counts)
