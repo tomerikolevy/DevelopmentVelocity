@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 
 from .config import RUBRIC_DIR, Config
@@ -55,11 +56,17 @@ def normalize(result: dict) -> dict:
     return out
 
 
-def call_claude_json(cfg: Config, system: str, user: str, schema: dict, max_tokens: int = 16000) -> dict:
-    """One structured-output request. Refusals fall back server-side to another model."""
+def make_client(cfg: Config):
+    """Client using the key in cfg.api_key_env if set, else the SDK's default credential chain."""
     import anthropic  # imported lazily so tests and sync work without the SDK configured
 
-    client = anthropic.Anthropic()
+    key = os.environ.get(cfg.api_key_env, "").strip() if cfg.api_key_env else ""
+    return anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
+
+
+def call_claude_json(cfg: Config, system: str, user: str, schema: dict, max_tokens: int = 16000) -> dict:
+    """One structured-output request. Refusals fall back server-side to another model."""
+    client = make_client(cfg)
     response = client.beta.messages.create(
         model=cfg.model,
         max_tokens=max_tokens,
@@ -84,14 +91,15 @@ def preflight(cfg: Config) -> None:
     import anthropic
 
     try:
-        anthropic.Anthropic().models.retrieve(cfg.model)
+        make_client(cfg).models.retrieve(cfg.model)
     except anthropic.AuthenticationError as e:
         raise ScoringError(f"Anthropic API rejected the credentials: {e}") from e
     except anthropic.NotFoundError as e:
         raise ScoringError(f"Model '{cfg.model}' not found; check [scoring].model in config.toml") from e
     except TypeError as e:  # raised by the SDK when no credentials are configured at all
         raise ScoringError(
-            "No Anthropic credentials found. Set ANTHROPIC_API_KEY (or log in with `ant auth login`)."
+            f"No Anthropic credentials found. Set {cfg.api_key_env or 'ANTHROPIC_API_KEY'} "
+            "(or log in with `ant auth login`)."
         ) from e
 
 

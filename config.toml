@@ -15,6 +15,9 @@ label_prefix = "complexity:"
 [scoring]
 model = "claude-opus-5-5"
 effort = "medium"
+# Environment variable holding the Anthropic API key. If it is unset, the SDK's usual
+# credentials are used (ANTHROPIC_API_KEY, `ant auth login`, federation).
+api_key_env = "ANTHROPIC_API_KEY_COMPLEXITY_SCORER"
 # Active rubric version: rubric/rubric_v<N>.md. Calibrate bumps this when you accept a proposal.
 rubric_version = 1
 max_diff_chars = 40000

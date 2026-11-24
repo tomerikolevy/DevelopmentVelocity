@@ -6,11 +6,13 @@ Tracks development velocity as **complexity units delivered over time**. Each of
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install anthropic pytest
-export ANTHROPIC_API_KEY=...        # or: ant auth login
+export ANTHROPIC_API_KEY_COMPLEXITY_SCORER=...   # or: ant auth login
 gh auth status                      # gh must be logged in
 ```
 
-Settings live in `config.toml`: author, start date, excluded repos, model, effort, and the active rubric version.
+Settings live in `config.toml`: author, start date, excluded repos, model, effort, the API key variable (`api_key_env`), and the active rubric version.
+
+The key is read from `ANTHROPIC_API_KEY_COMPLEXITY_SCORER`. If that variable is unset, the SDK's usual credentials apply (`ANTHROPIC_API_KEY`, an `ant auth login` sign-in, or workload identity federation).
 
 ## Commands
 

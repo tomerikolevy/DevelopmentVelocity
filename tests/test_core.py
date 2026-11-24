@@ -259,3 +259,15 @@ def test_reject_reopens_dispute_and_stats(store, cfg, rubric_dir):
     assert data["reviews"][0]["status"] == "open"
     s = cal.stats(data)
     assert s["by_version"][0]["agreement"] == 0.5 and s["open_disputes"] == 1
+
+
+def test_make_client_prefers_configured_key_env(monkeypatch):
+    from velocity.config import Config
+    from velocity.scorer import make_client
+
+    cfg = Config(api_key_env="ANTHROPIC_API_KEY_COMPLEXITY_SCORER")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "generic-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY_COMPLEXITY_SCORER", "scorer-key")
+    assert make_client(cfg).api_key == "scorer-key"
+    monkeypatch.delenv("ANTHROPIC_API_KEY_COMPLEXITY_SCORER")
+    assert make_client(cfg).api_key == "generic-key"

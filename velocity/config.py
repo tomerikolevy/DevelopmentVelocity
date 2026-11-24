@@ -21,6 +21,7 @@ class Config:
     label_prefix: str = "complexity:"
     model: str = "claude-opus-5-5"
     effort: str = "medium"
+    api_key_env: str = "ANTHROPIC_API_KEY_COMPLEXITY_SCORER"
     rubric_version: int = 1
     max_diff_chars: int = 40000
     max_lines_per_file: int = 300
@@ -38,6 +39,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         label_prefix=raw.get("label_prefix", "complexity:"),
         model=scoring.get("model", "claude-opus-5-5"),
         effort=scoring.get("effort", "medium"),
+        api_key_env=scoring.get("api_key_env", "ANTHROPIC_API_KEY_COMPLEXITY_SCORER"),
         rubric_version=int(scoring.get("rubric_version", 1)),
         max_diff_chars=int(scoring.get("max_diff_chars", 40000)),
         max_lines_per_file=int(scoring.get("max_lines_per_file", 300)),
