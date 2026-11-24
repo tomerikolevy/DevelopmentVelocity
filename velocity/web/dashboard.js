@@ -128,7 +128,7 @@
       <td class="dims">${d(p)}</td>
       <td>${esc(p.rationale || "")}</td>
       <td><span class="tag ${p.score_source === "manual" ? "manual" : ""}">${p.score_source}</span></td>
-      <td class="num">${p.rubric_version ? "v" + p.rubric_version : "—"}</td></tr>`).join("");
+      <td class="num">${p.rubric_version ? "v" + p.rubric_version : "—"}${p.model ? `<span class="cell-note">${esc(modelLabel(p.model))} · ${esc(p.effort || "medium")}</span>` : ""}</td></tr>`).join("");
     $("#table-sub").textContent = `${rows.length} PRs in the current filter. Click a column to sort.`;
   }
 
@@ -139,11 +139,32 @@
     if (!r.ok) throw new Error(j.error || r.statusText);
     return j;
   }
+  function modelLabel(id) {
+    const m = (state.data.scoring?.models || []).find(x => x.id === id);
+    return m ? m.label.replace(/^Claude /, "") : id;
+  }
+  function renderScoring() {
+    const sc = state.data.scoring;
+    if (STATIC || !sc) return;
+    $("#s-model").innerHTML = sc.models.map(m => `<option value="${esc(m.id)}"${m.id === sc.model ? " selected" : ""}>${esc(m.label)}</option>`).join("");
+    $("#s-effort").innerHTML = sc.efforts.map(e => `<option value="${e}"${e === sc.effort ? " selected" : ""}>${e}</option>`).join("");
+  }
+  async function saveScoring() {
+    const body = JSON.stringify({ model: $("#s-model").value, effort: $("#s-effort").value });
+    try {
+      await api("/api/settings/scoring", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    } catch (e) { alert(e.message); }
+    await load();  // refreshes the selectors and the outdated count
+  }
+  $("#s-model").onchange = saveScoring;
+  $("#s-effort").onchange = saveScoring;
+
   function renderBanners() {
     const d = state.data;
     if (STATIC) return;
     const parts = [];
-    if (d.outdated) parts.push(`${d.outdated} PRs were scored with an older rubric (current: v${d.rubric_version}).`);
+    const sc = d.scoring;
+    if (d.outdated) parts.push(`${d.outdated} PRs were scored with an older rubric or different settings (current: rubric v${d.rubric_version}, ${modelLabel(sc.model)}, ${sc.effort} effort).`);
     if (d.unscored) parts.push(`${d.unscored} PRs have not been scored yet.`);
     $("#rescore-banner").classList.toggle("hidden", !parts.length);
     $("#rescore-text").textContent = parts.join(" ") + (parts.length ? " Rescore scores them locally; GitHub labels change only after you apply them." : "");
@@ -163,10 +184,11 @@
     const s = await api("/api/rescore/status");
     const running = s.state === "running";
     $("#rescore-btn").disabled = running; $("#labels-btn").disabled = running;
+    $("#s-model").disabled = running; $("#s-effort").disabled = running;
     $("#rescore-progress").classList.toggle("hidden", !(running && s.kind === "rescore"));
     if (running) {
       if (s.total) { $("#rescore-progress").max = s.total; $("#rescore-progress").value = s.done; }
-      $("#rescore-text").textContent = s.kind === "rescore" ? `Rescoring… ${s.done}/${s.total || "?"}` : "Writing labels to GitHub…";
+      $("#rescore-text").textContent = s.kind === "rescore" ? `Rescoring with ${modelLabel(s.model)} (${s.effort} effort)… ${s.done}/${s.total || "?"}` : "Writing labels to GitHub…";
       setTimeout(poll, 1500);
       return;
     }
@@ -206,10 +228,11 @@
     sel.innerHTML = `<option value="">All repositories</option>` + repos.map(r => `<option ${r === cur ? "selected" : ""}>${esc(r)}</option>`).join("");
     const scored = state.data.prs.filter(p => p.score != null).length;
     $("#meta").textContent = `${scored} scored PRs · rubric v${state.data.rubric_version}${STATIC ? ` · exported ${STATIC.exported_at}` : ""}`;
+    renderScoring();
     renderBanners();
     document.getElementById("empty-note")?.remove();
     if (!scored) {
-      document.querySelector("main").insertAdjacentHTML("afterbegin", `<div class="card" id="empty-note" style="margin-bottom:16px">No scored PRs yet. Run <code>python -m velocity sync</code> then <code>python -m velocity score</code>.</div>`);
+      document.querySelector("main").insertAdjacentHTML("afterbegin", `<div class="card" id="empty-note" style="margin-bottom:16px">No scored PRs yet. ${STATIC ? "Run <code>python -m velocity score</code>, then export again." : "Pick a scoring model above and click <b>Rescore</b>, or run <code>python -m velocity score</code>."}</div>`);
     }
     render();
   }

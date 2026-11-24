@@ -116,12 +116,12 @@ class ClaudeScorer:
         return normalize(call_claude_json(self.cfg, self.rubric, user, SCORE_SCHEMA))
 
 
-def apply_result(pr: dict, result: dict, rubric_version: int, model: str) -> None:
+def apply_result(pr: dict, result: dict, rubric_version: int, model: str, effort: str | None = None) -> None:
     """Record an LLM score on a PR, keeping the previous LLM score in score_history."""
     if pr.get("llm_score") is not None:
         pr.setdefault("score_history", []).append({
             "score": pr["llm_score"], "rubric_version": pr.get("rubric_version"),
-            "model": pr.get("model"), "dimensions": pr.get("dimensions"),
+            "model": pr.get("model"), "effort": pr.get("effort"), "dimensions": pr.get("dimensions"),
             "rationale": pr.get("rationale"), "scored_at": pr.get("scored_at"),
         })
     pr["llm_score"] = result["score"]
@@ -131,6 +131,7 @@ def apply_result(pr: dict, result: dict, rubric_version: int, model: str) -> Non
     pr["confidence"] = result["confidence"]
     pr["rubric_version"] = rubric_version
     pr["model"] = model
+    pr["effort"] = effort
     pr["scored_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if pr.get("score_source") != "manual":
         pr["score"] = result["score"]

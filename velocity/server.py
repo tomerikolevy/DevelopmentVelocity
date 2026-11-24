@@ -1,6 +1,7 @@
 """Local dashboard server (stdlib only): velocity page, calibrate page and their JSON API."""
 from __future__ import annotations
 
+import dataclasses
 import errno
 import json
 import re
@@ -11,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 from . import calibrate as cal
-from .config import WEB_DIR, Config
+from .config import EFFORTS, MODELS, WEB_DIR, Config, set_scoring
 from .github import GitHub
 from .pipeline import diff_report, pending_labels, run_scoring, select_targets, write_labels
 from .scorer import load_rubric
@@ -20,7 +21,7 @@ from .store import Store
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
                  ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
 PR_FIELDS = ("key", "repo", "number", "title", "url", "merged_at", "score", "llm_score", "score_source",
-             "dimensions", "rationale", "summary", "confidence", "rubric_version", "label_status")
+             "dimensions", "rationale", "summary", "confidence", "rubric_version", "model", "effort", "label_status")
 
 
 def dashboard_data(store: Store, cfg: Config) -> dict:
@@ -34,10 +35,15 @@ def dashboard_data(store: Store, cfg: Config) -> dict:
         row["history"] = [{"score": h["score"], "rubric_version": h["rubric_version"]}
                           for h in pr.get("score_history", [])]
         rows.append(row)
-    outdated = len(select_targets(prs, "outdated", cfg.rubric_version))
+    outdated = len(select_targets(prs, "outdated", cfg.rubric_version, model=cfg.model, effort=cfg.effort))
     unscored = len(select_targets(prs, "unscored", cfg.rubric_version))
     return {"prs": rows, "rubric_version": cfg.rubric_version, "outdated": outdated - unscored,
-            "unscored": unscored, "pending_labels": len(pending_labels(prs))}
+            "unscored": unscored, "pending_labels": len(pending_labels(prs)),
+            "scoring": scoring_settings(cfg)}
+
+
+def scoring_settings(cfg: Config) -> dict:
+    return {"model": cfg.model, "effort": cfg.effort, "models": MODELS, "efforts": EFFORTS}
 
 
 class Jobs:
@@ -80,10 +86,14 @@ def make_handler(cfg: Config, store: Store, jobs: Jobs):
     def rescore_job(job: Jobs):
         from .scorer import ClaudeScorer
 
-        keys = select_targets(store.load_prs(), "outdated", cfg.rubric_version)
+        # Freeze the settings so a change in the dashboard can't switch model mid-run.
+        run_cfg = dataclasses.replace(cfg)
+        keys = select_targets(store.load_prs(), "outdated", run_cfg.rubric_version,
+                              model=run_cfg.model, effort=run_cfg.effort)
         with job.lock:
-            job.state["total"] = len(keys)
-        run = run_scoring(keys, ClaudeScorer(cfg), store, cfg.model, progress=job.progress)
+            job.state.update(total=len(keys), model=run_cfg.model, effort=run_cfg.effort)
+        run = run_scoring(keys, ClaudeScorer(run_cfg), store, run_cfg.model, progress=job.progress,
+                          effort=run_cfg.effort)
         return diff_report(run)
 
     def labels_job(include_manual: bool):
@@ -181,6 +191,14 @@ def make_handler(cfg: Config, store: Store, jobs: Jobs):
                         return self._json({"rubric_version": version})
                     fn = cal.reject_proposal if action == "reject" else cal.save_proposal
                     return self._json({"proposal": fn(store, pid)})
+                if path == "/api/settings/scoring":
+                    if jobs.snapshot().get("state") == "running":
+                        return self._json({"error": "Wait for the running job to finish."}, 409)
+                    model = body.get("model", cfg.model)
+                    effort = body.get("effort", cfg.effort)
+                    set_scoring(model, effort)  # validates; raises ValueError on unknown values
+                    cfg.model, cfg.effort = model, effort
+                    return self._json(scoring_settings(cfg))
                 if path == "/api/rescore/start":
                     ok = jobs.start("rescore", rescore_job)
                     return self._json({"started": ok}, 200 if ok else 409)
