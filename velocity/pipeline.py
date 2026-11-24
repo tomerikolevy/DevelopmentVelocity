@@ -5,7 +5,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Iterable, Protocol
 
-from .config import Config
+from .config import DEFAULT_EFFORT, Config
 from .github import GhError, GitHub
 from .scorer import apply_result
 from .store import Store
@@ -17,9 +17,21 @@ class Scorer(Protocol):
     def score(self, pr: dict, diff: str) -> dict: ...
 
 
+def is_outdated(pr: dict, version: int, model: str | None = None, effort: str | None = None) -> bool:
+    """Scored with an older rubric, or (when given) a different model or effort than the current settings."""
+    if (pr.get("rubric_version") or 0) < version:
+        return True
+    if model and pr.get("model") != model:
+        return True
+    # Scores recorded before effort was tracked were made at the default.
+    return bool(effort) and (pr.get("effort") or DEFAULT_EFFORT) != effort
+
+
 def select_targets(prs: dict[str, dict], mode: str, version: int, repo: str | None = None,
-                   since: str | None = None, limit: int | None = None) -> list[str]:
-    """mode: 'unscored' (never scored), 'outdated' (older rubric or unscored), 'all'."""
+                   since: str | None = None, limit: int | None = None,
+                   model: str | None = None, effort: str | None = None) -> list[str]:
+    """mode: 'unscored' (never scored), 'outdated' (unscored, or scored with an older rubric or
+    different model/effort), 'all'."""
     keys = []
     for key, pr in sorted(prs.items(), key=lambda kv: kv[1].get("merged_at") or "", reverse=True):
         if repo and pr["repo"] != repo:
@@ -29,14 +41,15 @@ def select_targets(prs: dict[str, dict], mode: str, version: int, repo: str | No
         scored = pr.get("llm_score") is not None
         if mode == "unscored" and scored:
             continue
-        if mode == "outdated" and scored and (pr.get("rubric_version") or 0) >= version:
+        if mode == "outdated" and scored and not is_outdated(pr, version, model, effort):
             continue
         keys.append(key)
     return keys[:limit] if limit else keys
 
 
 def run_scoring(keys: list[str], scorer: Scorer, store: Store, model: str, workers: int = 4,
-                progress: Callable[[int, int, str, str], None] | None = None) -> dict:
+                progress: Callable[[int, int, str, str], None] | None = None,
+                effort: str | None = None) -> dict:
     """Scores each PR and saves it right away, so an interrupted run resumes where it stopped.
 
     Returns {"changes": [{key, old, new}], "errors": [{key, error}]} where old/new are
@@ -66,7 +79,7 @@ def run_scoring(keys: list[str], scorer: Scorer, store: Store, model: str, worke
                 current = store.load_prs()
                 pr = current[key]
                 old_effective, old_llm = pr.get("score"), pr.get("llm_score")
-                apply_result(pr, result, scorer.version, model)
+                apply_result(pr, result, scorer.version, model, effort)
                 store.save_prs(current)
             changes.append({
                 "key": key, "title": pr["title"], "repo": pr["repo"], "merged_at": pr.get("merged_at"),

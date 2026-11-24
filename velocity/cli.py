@@ -31,16 +31,19 @@ def _score(args, cfg, store, mode: str) -> None:
         print("No PRs in the local store. Run `python -m velocity sync` first.")
         return
     keys = select_targets(prs, mode, cfg.rubric_version, repo=args.repo,
-                          since=getattr(args, "since", None), limit=args.limit)
+                          since=getattr(args, "since", None), limit=args.limit,
+                          model=cfg.model, effort=cfg.effort)
     if not keys:
-        print(f"Nothing to score: every PR is already at rubric v{cfg.rubric_version}.")
+        print(f"Nothing to score: every PR is already scored with rubric v{cfg.rubric_version}, "
+              f"{cfg.model}, {cfg.effort} effort.")
     else:
-        print(f"Scoring {len(keys)} PRs with rubric v{cfg.rubric_version} ({cfg.model})...")
+        print(f"Scoring {len(keys)} PRs with rubric v{cfg.rubric_version} ({cfg.model}, {cfg.effort} effort)...")
         try:
             scorer = ClaudeScorer(cfg)
         except ScoringError as e:
             sys.exit(f"Error: {e}")
-        run = run_scoring(keys, scorer, store, cfg.model, workers=args.workers, progress=_progress)
+        run = run_scoring(keys, scorer, store, cfg.model, workers=args.workers, progress=_progress,
+                          effort=cfg.effort)
         print()
         print(format_report(diff_report(run)))
     if args.dry_run:
@@ -63,7 +66,7 @@ def main(argv: list[str] | None = None) -> None:
     syp.add_argument("--workers", type=int, default=4, help="PRs downloaded in parallel")
 
     for name, help_text in (("score", "score PRs that were never scored"),
-                            ("rescore", "re-score PRs scored with an older rubric")):
+                            ("rescore", "re-score PRs scored with an older rubric or other model/effort")):
         sp = sub.add_parser(name, help=help_text)
         sp.add_argument("--repo", help="only this repo (owner/name)")
         sp.add_argument("--limit", type=int, help="at most N PRs (newest first)")

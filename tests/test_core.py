@@ -337,3 +337,91 @@ def test_sync_keeps_fetched_prs_when_interrupted(store, cfg):
     with pytest.raises(KeyboardInterrupt):
         sync(cfg, store, InterruptingGh(6), log=lambda m: None, workers=1)
     assert sorted(p["number"] for p in store.load_prs().values()) == [1, 2, 3]
+
+
+# --- model / effort selection ---------------------------------------------------
+def test_outdated_includes_model_and_effort_changes():
+    prs = {
+        "o/r#1": make_pr("o/r#1", llm_score=4, rubric_version=1, model="claude-opus-5-5", effort="medium"),
+        "o/r#2": make_pr("o/r#2", llm_score=4, rubric_version=1, model="claude-sonnet-5-5", effort="medium"),
+        "o/r#3": make_pr("o/r#3", llm_score=4, rubric_version=1, model="claude-opus-5-5", effort="high"),
+        "o/r#4": make_pr("o/r#4", llm_score=4, rubric_version=1, model="claude-opus-5-5"),  # pre-effort record
+    }
+    assert select_targets(prs, "outdated", 1) == []  # rubric-only check, as before
+    got = set(select_targets(prs, "outdated", 1, model="claude-opus-5-5", effort="medium"))
+    assert got == {"o/r#2", "o/r#3"}  # missing effort counts as the default (medium)
+    got = set(select_targets(prs, "outdated", 1, model="claude-opus-5-5", effort="high"))
+    assert got == {"o/r#1", "o/r#2", "o/r#4"}
+
+
+def test_run_scoring_records_model_and_effort(store):
+    store.save_prs({"o/r#1": make_pr("o/r#1")})
+    run_scoring(["o/r#1"], FakeScorer({"o/r#1": 5}), store, "claude-sonnet-5-5", effort="high")
+    store_pr = store.load_prs()["o/r#1"]
+    assert (store_pr["model"], store_pr["effort"]) == ("claude-sonnet-5-5", "high")
+    run_scoring(["o/r#1"], FakeScorer({"o/r#1": 6}), store, "claude-opus-5-5", effort="medium")
+    store_pr = store.load_prs()["o/r#1"]
+    assert store_pr["score_history"][-1]["model"] == "claude-sonnet-5-5"
+    assert store_pr["score_history"][-1]["effort"] == "high"
+
+
+def test_set_scoring_rewrites_config_and_validates(tmp_path):
+    from velocity.config import load_config, set_scoring
+
+    path = tmp_path / "config.toml"
+    path.write_text('author = "@me"\n\n[scoring]\n# keep me\nmodel = "claude-opus-5-5"\neffort = "medium"\nrubric_version = 3\n')
+    set_scoring("claude-haiku-5-5", "low", path=path)
+    cfg = load_config(path)
+    assert (cfg.model, cfg.effort, cfg.rubric_version) == ("claude-haiku-5-5", "low", 3)
+    assert "# keep me" in path.read_text()
+    with pytest.raises(ValueError):
+        set_scoring("gpt-4", "low", path=path)
+    with pytest.raises(ValueError):
+        set_scoring("claude-opus-5-5", "turbo", path=path)
+
+
+def test_config_defaults_to_opus_medium(tmp_path):
+    from velocity.config import load_config
+
+    cfg = load_config(tmp_path / "missing.toml")
+    assert (cfg.model, cfg.effort) == ("claude-opus-5-5", "medium")
+
+
+def test_settings_endpoint_updates_config_and_outdated_count(store, tmp_path, monkeypatch):
+    import threading
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from velocity import server as srv
+    from velocity.config import Config, set_scoring
+
+    path = tmp_path / "config.toml"
+    path.write_text('[scoring]\nmodel = "claude-opus-5-5"\neffort = "medium"\n')
+    monkeypatch.setattr(srv, "set_scoring", lambda m, e: set_scoring(m, e, path=path))
+    store.save_prs({"o/r#1": make_pr("o/r#1", llm_score=4, score=4, rubric_version=1,
+                                     model="claude-opus-5-5", effort="medium")})
+    cfg = Config(rubric_version=1)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), srv.make_handler(cfg, store, srv.Jobs()))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_port}"
+
+    def call(p, body=None):
+        req = urllib.request.Request(base + p, data=json.dumps(body).encode() if body is not None else None,
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    try:
+        status, data = call("/api/data")
+        assert data["scoring"]["model"] == "claude-opus-5-5" and data["outdated"] == 0
+        status, _ = call("/api/settings/scoring", {"model": "claude-sonnet-5-5", "effort": "high"})
+        assert status == 200 and (cfg.model, cfg.effort) == ("claude-sonnet-5-5", "high")
+        assert 'model = "claude-sonnet-5-5"' in path.read_text()
+        assert call("/api/data")[1]["outdated"] == 1
+        status, data = call("/api/settings/scoring", {"model": "nope", "effort": "high"})
+        assert status == 400 and cfg.model == "claude-sonnet-5-5"
+    finally:
+        httpd.shutdown()
