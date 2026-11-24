@@ -130,8 +130,11 @@ def make_handler(cfg: Config, store: Store, jobs: Jobs):
             keys = pending_labels(store.load_prs(), include_manual)
             with job.lock:
                 job.state["total"] = len(keys)
-            return write_labels(keys, cfg, store, GitHub(), include_manual,
-                                log=lambda m: job.progress(0, len(keys), "labels", m))
+            def log(msg: str):
+                with job.lock:
+                    job.state["log"] = (job.state["log"] + [msg])[-8:]
+
+            return write_labels(keys, cfg, store, GitHub(), include_manual, log=log, progress=job.progress)
         return fn
 
     class Handler(BaseHTTPRequestHandler):

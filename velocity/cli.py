@@ -56,7 +56,7 @@ def _score(args, cfg, store, mode: str) -> None:
         print("\nNo labels to update.")
         return
     if _confirm(f"\nWrite complexity labels to {len(todo)} PRs on GitHub?", args.yes):
-        write_labels(todo, cfg, store, GitHub(), include_manual)
+        write_labels(todo, cfg, store, GitHub(), include_manual, progress=_progress)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "labels":
         todo = pending_labels(store.load_prs(), args.include_manual)
         if todo and _confirm(f"Write complexity labels to {len(todo)} PRs on GitHub?", args.yes):
-            write_labels(todo, cfg, store, GitHub(), args.include_manual)
+            write_labels(todo, cfg, store, GitHub(), args.include_manual, progress=_progress)
         elif not todo:
             print("No labels to update.")
     if args.cmd == "serve":

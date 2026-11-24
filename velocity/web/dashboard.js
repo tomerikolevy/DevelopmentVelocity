@@ -194,6 +194,14 @@
     $("#s-model").disabled = running; $("#s-effort").disabled = running;
     $("#rescore-progress").classList.toggle("hidden", !(running && s.kind === "rescore"));
     $("#sync-progress").classList.toggle("hidden", !(syncing && s.total));
+    const labelling = running && s.kind === "labels";
+    $("#labels-progress").classList.toggle("hidden", !labelling);
+    if (labelling) {
+      $("#labels-banner").classList.remove("hidden");
+      if (s.total) { $("#labels-progress").max = s.total; $("#labels-progress").value = s.done; }
+      else $("#labels-progress").removeAttribute("value");
+      $("#labels-text").textContent = `Writing labels to GitHub… ${s.done}/${s.total || "?"}`;
+    }
     if (syncing) {
       $("#sync-banner").classList.remove("hidden");
       if (s.total) { $("#sync-progress").max = s.total; $("#sync-progress").value = s.done; }
@@ -202,7 +210,7 @@
     }
     if (running) {
       if (s.kind === "rescore" && s.total) { $("#rescore-progress").max = s.total; $("#rescore-progress").value = s.done; }
-      if (s.kind !== "sync-score") $("#rescore-text").textContent = s.kind === "rescore" ? `Rescoring with ${modelLabel(s.model)} (${s.effort} effort)… ${s.done}/${s.total || "?"}` : "Writing labels to GitHub…";
+      if (s.kind === "rescore") $("#rescore-text").textContent = `Rescoring with ${modelLabel(s.model)} (${s.effort} effort)… ${s.done}/${s.total || "?"}`;
       setTimeout(poll, 1500);
       return;
     }
