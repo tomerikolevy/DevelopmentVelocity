@@ -5,3 +5,4 @@ __pycache__/
 dashboard.html
 .pytest_cache/
 .demo/
+.DS_Store
