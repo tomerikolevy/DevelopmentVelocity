@@ -1,6 +1,7 @@
 """Local dashboard server (stdlib only): velocity page, calibrate page and their JSON API."""
 from __future__ import annotations
 
+import errno
 import json
 import re
 import threading
@@ -196,9 +197,31 @@ def make_handler(cfg: Config, store: Store, jobs: Jobs):
     return Handler
 
 
+def _dashboard_running(url: str) -> bool:
+    """True if a velocity dashboard already answers at url."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{url}/api/data", timeout=2) as r:
+            return r.status == 200 and "prs" in json.loads(r.read())
+    except Exception:  # noqa: BLE001 - anything else on the port is "not ours"
+        return False
+
+
 def serve(cfg: Config, store: Store, port: int, open_browser: bool = True) -> None:
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(cfg, store, Jobs()))
     url = f"http://localhost:{port}"
+    try:
+        httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(cfg, store, Jobs()))
+    except OSError as e:
+        if e.errno != errno.EADDRINUSE:
+            raise
+        if _dashboard_running(url):
+            print(f"The dashboard is already running at {url}; opening it.")
+            if open_browser:
+                webbrowser.open(url)
+            return
+        raise SystemExit(f"Port {port} is in use by another program. "
+                         f"Stop it, or run `velocity serve --port <other>`.") from e
     print(f"Dashboard running at {url}  (Ctrl+C to stop)")
     if open_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
